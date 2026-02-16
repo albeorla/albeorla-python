@@ -1,0 +1,37 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "albeorla-logging"
+version = "0.1.0"
+description = "Structured logging helpers for Python apps"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.10"
+authors = [{ name = "albeorla" }]
+keywords = ["logging", "structlog", "json", "observability"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Typing :: Typed",
+]
+dependencies = [
+    "structlog>=24.1.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/albeorla/albeorla-logging"
+Repository = "https://github.com/albeorla/albeorla-logging"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/albeorla_logging"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
