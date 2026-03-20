@@ -28,8 +28,8 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/albertjorlando-afk/claude-cli-bridge"
-Repository = "https://github.com/albertjorlando-afk/claude-cli-bridge"
+Homepage = "https://github.com/albeorla/claude-cli-bridge"
+Repository = "https://github.com/albeorla/claude-cli-bridge"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/claude_cli_bridge"]
