@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 import uuid
 from dataclasses import dataclass, field
 from hashlib import md5
@@ -27,7 +28,8 @@ class Session:
     session_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     key: Any = None
     turn_count: int = 0
-    busy: bool = False
+    lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    last_active: float = field(default_factory=time.monotonic)
 
 
 @dataclass
@@ -73,6 +75,11 @@ class ClaudeBridge:
     allowed_tools:
         Restrict available tools (e.g., ``["Read", "WebSearch"]``).  If
         *None* all tools are available.
+    query_timeout:
+        Maximum seconds to wait for a single CLI query before killing the
+        process.  Defaults to 300 (5 minutes).
+    max_concurrent:
+        Maximum number of concurrent subprocess queries across all sessions.
     """
 
     def __init__(
@@ -84,6 +91,8 @@ class ClaudeBridge:
         permission_mode: str = "bypassPermissions",
         model: str | None = None,
         allowed_tools: list[str] | None = None,
+        query_timeout: float = 300,
+        max_concurrent: int = 5,
     ):
         self._binary = claude_binary
         self._work_dir = work_dir
@@ -91,6 +100,8 @@ class ClaudeBridge:
         self._permission_mode = permission_mode
         self._model = model
         self._allowed_tools = allowed_tools
+        self._query_timeout = query_timeout
+        self._semaphore = asyncio.Semaphore(max_concurrent)
         self._sessions: dict[Any, Session] = {}
 
     # -- Session management --------------------------------------------------
@@ -116,6 +127,23 @@ class ClaudeBridge:
     def active_sessions(self) -> dict[Any, Session]:
         """Return a shallow copy of the active sessions dict."""
         return dict(self._sessions)
+
+    def cleanup_stale_sessions(self, max_age_seconds: float = 7200) -> int:
+        """Remove sessions that have been idle longer than *max_age_seconds*.
+
+        Returns the number of sessions removed.
+        """
+        now = time.monotonic()
+        stale_keys = [
+            key
+            for key, session in self._sessions.items()
+            if (now - session.last_active) > max_age_seconds
+        ]
+        for key in stale_keys:
+            self.remove_session(key)
+        if stale_keys:
+            log.info("stale_sessions_cleaned", count=len(stale_keys))
+        return len(stale_keys)
 
     # -- Query ---------------------------------------------------------------
 
@@ -157,90 +185,109 @@ class ClaudeBridge:
         if not session:
             session = self.create_session(key)
 
-        if session.busy:
-            log.warning("session_busy", key=key, session_id=session.session_id)
-            return Response(text="Session is busy.", is_error=True)
-
-        session.busy = True
-        cmd = self._build_cmd(message, session)
-        log.info(
-            "query_start",
-            key=key,
-            session_id=session.session_id,
-            turn=session.turn_count,
-            message_preview=message[:100],
-        )
-
-        try:
-            proc = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                cwd=self._work_dir,
+        async with session.lock:
+            cmd = self._build_cmd(message, session)
+            log.info(
+                "query_start",
+                key=key,
+                session_id=session.session_id,
+                turn=session.turn_count,
+                message_preview=message[:100],
             )
-
-            stdout_bytes, stderr_bytes = await proc.communicate()
-            stdout_text = stdout_bytes.decode().strip()
-            stderr_text = stderr_bytes.decode().strip()
-
-            if proc.returncode != 0:
-                log.error(
-                    "process_error",
-                    returncode=proc.returncode,
-                    stderr=stderr_text[:500],
-                    session_id=session.session_id,
-                )
-                return Response(
-                    text=stderr_text or "Claude CLI returned a non-zero exit code.",
-                    is_error=True,
-                )
 
             try:
-                data = json.loads(stdout_text)
-            except json.JSONDecodeError:
-                log.error("json_parse_error", stdout=stdout_text[:500])
-                return Response(text=stdout_text or "No response.", is_error=True)
+                async with self._semaphore:
+                    proc = await asyncio.create_subprocess_exec(
+                        *cmd,
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.PIPE,
+                        cwd=self._work_dir,
+                    )
 
-            # Extract result text — can be a string or a list of content blocks
-            result_text = ""
-            result_content = data.get("result", "")
-            if isinstance(result_content, str):
-                result_text = result_content
-            elif isinstance(result_content, list):
-                for block in result_content:
-                    if isinstance(block, dict) and block.get("type") == "text":
-                        result_text += block.get("text", "")
+                    try:
+                        stdout_bytes, stderr_bytes = await asyncio.wait_for(
+                            proc.communicate(), timeout=self._query_timeout
+                        )
+                    except TimeoutError:
+                        proc.kill()
+                        await proc.wait()
+                        log.error(
+                            "query_timeout",
+                            key=key,
+                            session_id=session.session_id,
+                            timeout=self._query_timeout,
+                        )
+                        return Response(
+                            text=f"Query timed out after {self._query_timeout}s.",
+                            is_error=True,
+                        )
 
-            session_id = data.get("session_id", session.session_id)
-            session.session_id = session_id
-            session.turn_count += 1
+                stdout_text = stdout_bytes.decode(errors="replace").strip()
+                stderr_text = stderr_bytes.decode(errors="replace").strip()
 
-            response = Response(
-                text=result_text or "",
-                session_id=session_id,
-                cost_usd=data.get("total_cost_usd", 0.0),
-                duration_ms=data.get("duration_ms", 0),
-                num_turns=data.get("num_turns", 0),
-                raw=data,
-            )
+                if proc.returncode != 0:
+                    log.error(
+                        "process_error",
+                        returncode=proc.returncode,
+                        stderr=stderr_text[:500],
+                        session_id=session.session_id,
+                    )
+                    return Response(
+                        text=stderr_text or "Claude CLI returned a non-zero exit code.",
+                        is_error=True,
+                    )
 
-            log.info(
-                "query_complete",
-                key=key,
-                session_id=session_id,
-                turn=session.turn_count,
-                duration_ms=response.duration_ms,
-                cost_usd=response.cost_usd,
-                response_length=len(response.text),
-            )
+                try:
+                    data = json.loads(stdout_text)
+                except json.JSONDecodeError:
+                    log.error("json_parse_error", stdout=stdout_text[:500])
+                    return Response(text=stdout_text or "No response.", is_error=True)
 
-            return response
+                # Extract result text — can be a string or a list of content blocks
+                result_text = ""
+                result_content = data.get("result", "")
+                if isinstance(result_content, str):
+                    result_text = result_content
+                elif isinstance(result_content, list):
+                    for block in result_content:
+                        if isinstance(block, dict) and block.get("type") == "text":
+                            result_text += block.get("text", "")
+                else:
+                    log.warning(
+                        "unexpected_result_type",
+                        result_type=type(result_content).__name__,
+                        session_id=session.session_id,
+                    )
 
-        except Exception:
-            log.exception("query_failed", key=key)
-            return Response(text="Query failed unexpectedly.", is_error=True)
-        finally:
-            session.busy = False
+                session_id = data.get("session_id", session.session_id)
+                session.session_id = session_id
+                session.turn_count += 1
+                session.last_active = time.monotonic()
+
+                response = Response(
+                    text=result_text or "",
+                    session_id=session_id,
+                    cost_usd=data.get("total_cost_usd", 0.0),
+                    duration_ms=data.get("duration_ms", 0),
+                    num_turns=data.get("num_turns", 0),
+                    raw=data,
+                )
+
+                log.info(
+                    "query_complete",
+                    key=key,
+                    session_id=session_id,
+                    turn=session.turn_count,
+                    duration_ms=response.duration_ms,
+                    cost_usd=response.cost_usd,
+                    response_length=len(response.text),
+                )
+
+                return response
+
+            except Exception:
+                log.exception("query_failed", key=key)
+                return Response(text="Query failed unexpectedly.", is_error=True)
 
     # -- One-shot convenience ------------------------------------------------
 
