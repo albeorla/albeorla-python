@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "albeorla-claude-cli-bridge"
-version = "0.1.1"
+version = "0.2.0"
 description = "Async Python wrapper for the Claude Code CLI with session management"
 readme = "README.md"
 license = "MIT"
