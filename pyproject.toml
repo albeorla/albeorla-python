@@ -3,8 +3,8 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "claude-cli-bridge"
-version = "0.1.0"
+name = "albeorla-claude-cli-bridge"
+version = "0.1.1"
 description = "Async Python wrapper for the Claude Code CLI with session management"
 readme = "README.md"
 license = "MIT"
@@ -28,8 +28,8 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/albeorla/claude-cli-bridge"
-Repository = "https://github.com/albeorla/claude-cli-bridge"
+Homepage = "https://github.com/albeorla/albeorla-claude-cli-bridge"
+Repository = "https://github.com/albeorla/albeorla-claude-cli-bridge"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/claude_cli_bridge"]

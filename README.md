@@ -1,11 +1,11 @@
-# claude-cli-bridge
+# albeorla-claude-cli-bridge
 
 Async Python wrapper for the [Claude Code](https://claude.ai/code) CLI with automatic session management.
 
 ## Install
 
 ```bash
-pip install claude-cli-bridge
+pip install albeorla-claude-cli-bridge
 ```
 
 Requires the `claude` CLI to be installed and authenticated.
