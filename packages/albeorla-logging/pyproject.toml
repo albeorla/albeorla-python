@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "albeorla-logging"
-version = "0.1.0"
+version = "0.1.1"
 description = "Structured logging helpers for Python apps"
 readme = "README.md"
 license = "MIT"
