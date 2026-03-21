@@ -26,9 +26,12 @@ dependencies = [
     "structlog>=24.1.0",
 ]
 
+[dependency-groups]
+dev = ["pytest>=8.0"]
+
 [project.urls]
-Homepage = "https://github.com/albeorla/albeorla-logging"
-Repository = "https://github.com/albeorla/albeorla-logging"
+Homepage = "https://github.com/albeorla/albeorla-python"
+Repository = "https://github.com/albeorla/albeorla-python"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/albeorla_logging"]
