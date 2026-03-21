@@ -151,8 +151,10 @@ class ClaudeBridge:
         cmd = [
             self._binary,
             "-p",
-            "--output-format", "json",
-            "--permission-mode", self._permission_mode,
+            "--output-format",
+            "json",
+            "--permission-mode",
+            self._permission_mode,
         ]
 
         if session.turn_count == 0:
